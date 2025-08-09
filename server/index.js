@@ -7,6 +7,7 @@ const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 const Groq = require('groq-sdk');
+const { google } = require('googleapis');
 require('dotenv').config();
 
 const app = express();
@@ -24,8 +25,20 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // CORS configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://ai-mail-sender.onrender.com'
+];
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: function (origin, callback) {
+    // allow requests with no origin (like mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 
@@ -102,7 +115,7 @@ app.post('/api/generate-email', async (req, res) => {
 // Send email
 app.post('/api/send-email', async (req, res) => {
   try {
-    const { to, cc = [], bcc = [], subject, content, from, scheduledAt } = req.body;
+    const { to, cc = [], bcc = [], subject, content, from, scheduledAt, oauth2 } = req.body;
     console.log('📧 Send email request received:', { to, subject, from, contentLength: content?.length });
 
     if (!to || !subject || !content) {
@@ -110,8 +123,23 @@ app.post('/api/send-email', async (req, res) => {
       return res.status(400).json({ error: 'To, subject, and content are required' });
     }
 
+    let mailTransporter = transporter;
+    if (oauth2 && oauth2.clientId && oauth2.clientSecret && oauth2.refreshToken && oauth2.user) {
+      // Use OAuth2 for this request
+      mailTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          type: 'OAuth2',
+          user: oauth2.user,
+          clientId: oauth2.clientId,
+          clientSecret: oauth2.clientSecret,
+          refreshToken: oauth2.refreshToken,
+        },
+      });
+    }
+
     // Check if email transporter is configured
-    if (!transporter) {
+    if (!mailTransporter) {
       // Demo mode - simulate successful email sending
       console.log('🎭 DEMO MODE: Email would be sent with the following details:');
       console.log('From:', from || 'demo@example.com');
@@ -150,7 +178,10 @@ app.post('/api/send-email', async (req, res) => {
       bcc: bccList.length ? bccList.join(', ') : undefined,
       subject: subject,
       html: content.replace(/\n/g, '<br>'),
-      text: content
+      text: content,
+      headers: {
+        'Message-ID': `<${Date.now()}-${Math.floor(Math.random()*1e6)}@${process.env.EMAIL_USER.split('@')[1]}>`
+      }
     };
 
     // Handle scheduled sending
@@ -159,7 +190,7 @@ app.post('/api/send-email', async (req, res) => {
       const delayMs = Math.max(0, sendTime - Date.now());
       setTimeout(async () => {
         try {
-          const info = await transporter.sendMail(mailOptions);
+          const info = await mailTransporter.sendMail(mailOptions);
           console.log('📤 Scheduled email sent:', info.messageId);
         } catch (err) {
           console.error('❌ Scheduled send failed:', err);
@@ -174,7 +205,7 @@ app.post('/api/send-email', async (req, res) => {
       });
     }
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await mailTransporter.sendMail(mailOptions);
     console.log('📤 Email sent successfully:', info.messageId);
     console.log('📤 To:', recipients);
     console.log('📤 Subject:', subject);
@@ -383,6 +414,24 @@ NODE_ENV=development
   } catch (error) {
     console.error('❌ Error setting up Gmail:', error);
     res.status(500).json({ error: 'Failed to setup Gmail configuration' });
+  }
+});
+
+// New endpoint: Accept OAuth2 credentials for Gmail
+app.post('/api/gmail-oauth2-config', async (req, res) => {
+  try {
+    const { clientId, clientSecret, refreshToken, user } = req.body;
+    if (!clientId || !clientSecret || !refreshToken || !user) {
+      return res.status(400).json({ error: 'Missing OAuth2 credentials' });
+    }
+    // Test OAuth2 credentials by generating an access token
+    const oAuth2Client = new google.auth.OAuth2(clientId, clientSecret);
+    oAuth2Client.setCredentials({ refresh_token: refreshToken });
+    const { token } = await oAuth2Client.getAccessToken();
+    if (!token) throw new Error('Failed to get access token');
+    res.json({ success: true, message: 'OAuth2 credentials valid', accessToken: token });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   }
 });
 
