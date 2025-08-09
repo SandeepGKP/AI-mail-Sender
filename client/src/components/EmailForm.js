@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { UserPlus, Sparkles, Users, FileText, MessageSquare, CopyPlus, Calendar, CornerDownRight, PenTool } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+const API_BASE = 'https://ai-mail-sender-server.onrender.com';
+
 const EmailForm = ({ emailData, setEmailData, onEmailGenerated, isGenerating, setIsGenerating }) => {
   const [newRecipient, setNewRecipient] = useState('');
   const [emailValidation, setEmailValidation] = useState({});
@@ -47,7 +49,7 @@ const EmailForm = ({ emailData, setEmailData, onEmailGenerated, isGenerating, se
     }
     
     try {
-      const response = await fetch('http://localhost:5000/api/validate-emails', {
+      const response = await fetch(`${API_BASE}/api/validate-emails`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -85,7 +87,7 @@ const EmailForm = ({ emailData, setEmailData, onEmailGenerated, isGenerating, se
     
     // Check if Gmail is configured
     try {
-      const response = await fetch('http://localhost:5000/api/check-gmail-config');
+      const response = await fetch(`${API_BASE}/api/check-gmail-config`);
       const result = await response.json();
       if (!result.configured) {
         setShowGmailSetup(true);
@@ -104,7 +106,7 @@ const EmailForm = ({ emailData, setEmailData, onEmailGenerated, isGenerating, se
     };
 
     try {
-      const response = await fetch('http://localhost:5000/api/generate-email', {
+      const response = await fetch(`${API_BASE}/api/generate-email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -147,7 +149,7 @@ const EmailForm = ({ emailData, setEmailData, onEmailGenerated, isGenerating, se
     }
     
     try {
-      const response = await fetch('http://localhost:5000/api/setup-gmail', {
+      const response = await fetch(`${API_BASE}/api/setup-gmail`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -320,7 +322,7 @@ const EmailForm = ({ emailData, setEmailData, onEmailGenerated, isGenerating, se
                 type="button"
                 onClick={async () => {
                   try {
-                    const resp = await fetch('http://localhost:5000/api/suggest-subject', {
+                    const resp = await fetch(`${API_BASE}/api/suggest-subject`, {
                       method: 'POST', headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ prompt: emailData.prompt })
                     });

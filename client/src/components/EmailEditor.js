@@ -3,6 +3,8 @@ import { ArrowLeft, Send, Eye, Save, RotateCcw } from 'lucide-react';
 import TextareaAutosize from 'react-textarea-autosize';
 import toast from 'react-hot-toast';
 
+const API_BASE = 'https://ai-mail-sender-server.onrender.com';
+
 const EmailEditor = ({ emailData, onEmailEdited, onSendEmail, isSending, onBack }) => {
   const [editedContent, setEditedContent] = useState(emailData.editedEmail);
   const [showPreview, setShowPreview] = useState(false);
@@ -36,7 +38,7 @@ const EmailEditor = ({ emailData, onEmailEdited, onSendEmail, isSending, onBack 
     }
     
     try {
-      const response = await fetch('http://localhost:5000/api/send-email', {
+      const response = await fetch(`${API_BASE}/api/send-email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -182,7 +184,7 @@ const EmailEditor = ({ emailData, onEmailEdited, onSendEmail, isSending, onBack 
             <div className="flex gap-2 mb-3">
               <button
                 onClick={async () => {
-                  const resp = await fetch('http://localhost:5000/api/rewrite-email', {
+                  const resp = await fetch(`${API_BASE}/api/rewrite-email`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ content: editedContent, action: 'shorten', tone: emailData.tone })
                   });
@@ -197,7 +199,7 @@ const EmailEditor = ({ emailData, onEmailEdited, onSendEmail, isSending, onBack 
 
               <button
                 onClick={async () => {
-                  const resp = await fetch('http://localhost:5000/api/rewrite-email', {
+                  const resp = await fetch(`${API_BASE}/api/rewrite-email`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ content: editedContent, action: 'expand', tone: emailData.tone })
                   });
@@ -212,7 +214,7 @@ const EmailEditor = ({ emailData, onEmailEdited, onSendEmail, isSending, onBack 
 
               <button
                 onClick={async () => {
-                  const resp = await fetch('http://localhost:5000/api/rewrite-email', {
+                  const resp = await fetch(`${API_BASE}/api/rewrite-email`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ content: editedContent, action: 'formalize', tone: 'formal' })
                   });
