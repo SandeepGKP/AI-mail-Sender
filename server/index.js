@@ -5,14 +5,9 @@ const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 const Groq = require('groq-sdk');
-require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-
-// Store Gmail credentials in memory
-let globalSenderEmail = null;
-let globalSenderPassword = null;
 
 // Security middleware
 app.use(helmet());
@@ -20,25 +15,14 @@ app.use(compression());
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
+  windowMs: 15 * 60 * 1000, // 15 min
   max: 100
 });
 app.use(limiter);
 
 // CORS configuration
-const allowedOrigins = [
-  'http://localhost:3000',
-  'https://ai-mail-sender.onrender.com'
-];
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    } else {
-      return callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true
 }));
 
@@ -61,77 +45,130 @@ async function generateWithGroq(systemPrompt, userPrompt) {
   return completion.choices[0].message.content;
 }
 
+// Store Gmail credentials in memory (no .env, no demo)
+let gmailCredentials = { email: null, appPassword: null };
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Setup Gmail, generate, and send in one
-app.post('/api/setup-gmail', async (req, res) => {
+// Generate AI email
+app.post('/api/generate-email', async (req, res) => {
   try {
-    const { email, appPassword, prompt, tone = 'professional', length = 'medium', to, subject } = req.body;
+    const { prompt, tone = 'professional', length = 'medium' } = req.body;
+    if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
-    if (!email || !appPassword) {
-      return res.status(400).json({ error: 'Email and app password are required' });
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: 'Invalid email format' });
-    }
-    if (appPassword.length !== 16) {
-      return res.status(400).json({ error: 'App password should be 16 characters' });
-    }
-    if (!prompt || !to || !subject) {
-      return res.status(400).json({ error: 'Prompt, to, and subject are required' });
-    }
-
-    // Save in memory
-    globalSenderEmail = email;
-    globalSenderPassword = appPassword;
-
-    // Generate email content
     const systemPrompt = `You are a professional email writer. Generate a ${tone} email based on the following prompt. The email should be ${length} in length and follow proper email etiquette. Return only the email content without any additional formatting or explanations.`;
+
+    if (!groq) {
+      return res.status(400).json({ error: 'GROQ not configured' });
+    }
+
     const generatedEmail = await generateWithGroq(systemPrompt, prompt);
-
-    // Create transporter
-    const mailTransporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: { user: globalSenderEmail, pass: globalSenderPassword }
-    });
-
-    // Send email
-    const mailOptions = {
-      from: globalSenderEmail,
-      to: Array.isArray(to) ? to.join(', ') : to,
-      subject: subject,
-      html: generatedEmail.replace(/\n/g, '<br>'),
-      text: generatedEmail
-    };
-
-    const info = await mailTransporter.sendMail(mailOptions);
-    console.log('📤 Email sent:', info.messageId);
-
-    res.json({
-      success: true,
-      messageId: info.messageId,
-      recipients: Array.isArray(to) ? to : [to],
-      emailContent: generatedEmail
-    });
-
+    res.json({ success: true, email: generatedEmail, metadata: { tone, length, provider: 'groq' } });
   } catch (error) {
-    console.error('❌ Error in setup-gmail sequence:', error);
-    res.status(500).json({ error: 'Failed to configure, generate, and send email', details: error.message });
+    res.status(500).json({ error: 'Failed to generate email', details: error.message });
   }
 });
 
-// Error handling
+// Send email (always use credentials from /api/setup-gmail)
+app.post('/api/send-email', async (req, res) => {
+  try {
+    const { to, cc = [], bcc = [], subject, content, from, scheduledAt } = req.body;
+
+    if (!to || !subject || !content) {
+      return res.status(400).json({ error: 'To, subject, and content are required' });
+    }
+
+    if (!gmailCredentials.email || !gmailCredentials.appPassword) {
+      return res.status(400).json({ error: 'Gmail not configured. Please set it up first.' });
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      auth: { user: gmailCredentials.email, pass: gmailCredentials.appPassword }
+    });
+
+    const mailOptions = {
+      from: gmailCredentials.email,
+      replyTo: from && from !== gmailCredentials.email ? from : undefined,
+      to: Array.isArray(to) ? to.join(', ') : to,
+      cc: Array.isArray(cc) ? cc.join(', ') : cc,
+      bcc: Array.isArray(bcc) ? bcc.join(', ') : bcc,
+      subject,
+      html: content.replace(/\n/g, '<br>'),
+      text: content
+    };
+
+    if (scheduledAt) {
+      const sendTime = new Date(scheduledAt).getTime();
+      const delayMs = Math.max(0, sendTime - Date.now());
+      setTimeout(async () => {
+        try {
+          await transporter.sendMail(mailOptions);
+        } catch (err) {
+          console.error('❌ Scheduled send failed:', err);
+        }
+      }, delayMs);
+      return res.json({ success: true, scheduled: true, scheduledAt });
+    }
+
+    const info = await transporter.sendMail(mailOptions);
+    res.json({ success: true, messageId: info.messageId });
+
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to send email', details: error.message });
+  }
+});
+
+// Validate email list
+app.post('/api/validate-emails', (req, res) => {
+  const { emails } = req.body;
+  if (!emails || !Array.isArray(emails)) {
+    return res.status(400).json({ error: 'Emails array is required' });
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const validEmails = emails.filter(e => emailRegex.test(e));
+  const invalidEmails = emails.filter(e => !emailRegex.test(e));
+  res.json({ success: true, validEmails, invalidEmails });
+});
+
+// Check Gmail config
+app.get('/api/check-gmail-config', (req, res) => {
+  const isConfigured = !!(gmailCredentials.email && gmailCredentials.appPassword);
+  res.json({ success: true, configured: isConfigured });
+});
+
+// Setup Gmail credentials in memory
+app.post('/api/setup-gmail', (req, res) => {
+  const { email, appPassword } = req.body;
+
+  if (!email || !appPassword) {
+    return res.status(400).json({ error: 'Email and app password are required' });
+  }
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+  if (appPassword.length !== 16) {
+    return res.status(400).json({ error: 'App password should be 16 characters' });
+  }
+
+  gmailCredentials.email = email;
+  gmailCredentials.appPassword = appPassword;
+
+  res.json({ success: true, message: 'Gmail configured successfully', email });
+});
+
+// Error handler
 app.use((error, req, res, next) => {
-  console.error('Unhandled error:', error);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// 404 handler
+// 404
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
 });
