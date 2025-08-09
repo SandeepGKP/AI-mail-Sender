@@ -63,18 +63,22 @@ async function generateWithGroq(systemPrompt, userPrompt) {
 
 // Email transporter (Gmail)
 let transporter = null;
+function createTransporter(user, pass) {
+  return nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: { user, pass }
+  });
+}
+
 try {
   if (process.env.EMAIL_USER && process.env.EMAIL_PASS && 
       process.env.EMAIL_USER !== 'your-email@gmail.com' && 
       process.env.EMAIL_PASS !== 'your-app-password' &&
       process.env.EMAIL_USER !== 'your-real-gmail@gmail.com' &&
       process.env.EMAIL_PASS !== 'your-gmail-app-password') {
-    transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
-    });
+    transporter = createTransporter(process.env.EMAIL_USER, process.env.EMAIL_PASS);
     console.log('📧 Email configuration set up successfully with:', process.env.EMAIL_USER);
   } else {
     console.log('📧 Email configuration not set up. Running in DEMO MODE.');
@@ -170,9 +174,10 @@ app.post('/api/send-email', async (req, res) => {
       }
     }
 
+    const authUser = oauth2?.user || process.env.EMAIL_USER; // changed to use updated in-memory credentials
     const mailOptions = {
-      from: process.env.EMAIL_USER, // Gmail requires authenticated sender
-      replyTo: from && from !== process.env.EMAIL_USER ? from : undefined,
+      from: authUser, // Gmail requires authenticated sender
+      replyTo: from && from !== authUser ? from : undefined,
       to: recipients.join(', '),
       cc: ccList.length ? ccList.join(', ') : undefined,
       bcc: bccList.length ? bccList.join(', ') : undefined,
@@ -180,7 +185,7 @@ app.post('/api/send-email', async (req, res) => {
       html: content.replace(/\n/g, '<br>'),
       text: content,
       headers: {
-        'Message-ID': `<${Date.now()}-${Math.floor(Math.random()*1e6)}@${process.env.EMAIL_USER.split('@')[1]}>`
+        'Message-ID': `<${Date.now()}-${Math.floor(Math.random()*1e6)}@${authUser.split('@')[1]}>`
       }
     };
 
@@ -346,7 +351,7 @@ app.get('/api/check-gmail-config', (req, res) => {
   }
 });
 
-// Setup Gmail configuration
+// Setup Gmail configuration (MODIFIED to avoid redeploys)
 app.post('/api/setup-gmail', (req, res) => {
   try {
     const { email, appPassword } = req.body;
@@ -366,40 +371,13 @@ app.post('/api/setup-gmail', (req, res) => {
       return res.status(400).json({ error: 'App password should be 16 characters' });
     }
 
-    // Create .env content
-    const envContent = `# OpenAI Configuration
-OPENAI_API_KEY=your-openai-api-key-here
+    // Store in memory instead of writing to .env
+    process.env.EMAIL_USER = email;
+    process.env.EMAIL_PASS = appPassword;
 
-# Email Configuration (Gmail)
-EMAIL_USER=${email}
-EMAIL_PASS=${appPassword}
-
-# Server Configuration
-PORT=5000
-CLIENT_URL=http://localhost:3000
-
-# Security
-NODE_ENV=development
-`;
-
-    // Write to .env file
-    const envPath = path.join(__dirname, '.env');
-    fs.writeFileSync(envPath, envContent);
-
-    // Reload environment variables
-    require('dotenv').config({ path: envPath, override: true });
-
-    // Recreate transporter with new credentials
+    // Recreate transporter instantly
     try {
-      transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        auth: {
-          user: email,
-          pass: appPassword
-        }
-      });
+      transporter = createTransporter(email, appPassword);
       console.log('📧 Gmail configured successfully with:', email);
     } catch (error) {
       console.error('❌ Error creating transporter:', error);
@@ -450,4 +428,4 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📧 AI Email Sender API ready`);
   console.log(`🌐 Health check: http://localhost:${PORT}/api/health`);
-}); 
+});
