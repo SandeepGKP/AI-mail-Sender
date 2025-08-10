@@ -345,7 +345,7 @@ EMAIL_PASS=${appPassword}
 
 # Server Configuration
 PORT=5000
-CLIENT_URL=http://localhost:3000`;
+CLIENT_URL=https://ai-mail-sender.onrender.com`;
     // Write to .env file
     const envPath = path.join(__dirname, '.env');
     fs.writeFileSync(envPath, envContent);
