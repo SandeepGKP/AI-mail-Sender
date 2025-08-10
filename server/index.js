@@ -25,7 +25,7 @@ app.use(limiter);
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: process.env.CLIENT_URL,
   credentials: true
 }));
 
@@ -346,10 +346,7 @@ EMAIL_PASS=${appPassword}
 # Server Configuration
 PORT=5000
 CLIENT_URL=http://localhost:3000
-
-# Security
-NODE_ENV=development
-`;
+;
 
     // Write to .env file
     const envPath = path.join(__dirname, '.env');
